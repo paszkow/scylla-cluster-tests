@@ -1,0 +1,25 @@
+test_duration: 90
+
+stress_cmd: ["cassandra-stress write no-warmup cl=ALL duration=30m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 -pop seq=1..100000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5",
+             "cassandra-stress write no-warmup cl=ALL duration=30m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 -pop seq=100000001..200000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5",
+             "cassandra-stress write no-warmup cl=ALL duration=30m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 -pop seq=200000001..300000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5"
+            ]
+
+round_robin: true
+
+instance_type_db: 'i4i.large'
+# 30% of the instance db size (in bytes)
+space_node_threshold: 150753352089
+
+n_db_nodes: 3
+n_loaders: 3
+n_monitor_nodes: 1
+
+user_prefix: 'serverless-v2-50-percent-storage-capacity'
+
+append_scylla_yaml:
+  enable_tablets: true
+  tablets_initial_scale_factor: 8
+
+# Due to the existing bug: https://github.com/scylladb/scylla-enterprise/issues/3717
+enterprise_disable_kms: true
