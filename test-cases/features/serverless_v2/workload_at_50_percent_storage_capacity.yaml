@@ -19,7 +19,7 @@ user_prefix: 'serverless-v2-50-percent-storage-capacity'
 
 append_scylla_yaml:
   enable_tablets: true
-  tablets_initial_scale_factor: 8
+  tablets_initial_scale_factor: 16
 
 # Due to the existing bug: https://github.com/scylladb/scylla-enterprise/issues/3717
 enterprise_disable_kms: true
