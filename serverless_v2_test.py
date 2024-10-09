@@ -13,44 +13,42 @@ from sdcm.cluster import BaseNode, MAX_TIME_WAIT_FOR_NEW_NODE_UP
 # When soft limit is reached, trigger possible cluster scale out
 # When hard limit is reach notify tester
 
-# Map from AWS instance into its total disk storage in GB
-aws_instance_storage = {
-    "i4i.large": 468,
-    "i4i.xlarge": 937,
-    "i4i.2xlarge": 1875,
-    "i4i.4xlarge": 3750,
-    "i4i.8xlarge": 7500,
-    "i4i.12xlarge": 11250,
-    "i4i.16xlarge": 15000,
-    "i4i.24xlarge": 22500,
-    "i4i.32xlarge": 30000,
-}
-
 GB2B = 1024**3
+B2GB = 1/GB2B
 
 
 class DiskUsageMonitor(FileFollowerThread):
-    def __init__(self, node: BaseNode, limits: dict[str, Callable[[], None]], log):
+    def __init__(self, node: BaseNode, limits, log):
         super().__init__()
         self.node = node
         self.limits = limits
-        self.size = self.get_current_disk_usage()
+        self.size = self.get_total_disk_size()
+        self.used = self.get_current_disk_usage()
         self.log = log
 
     def get_current_disk_usage(self):
         output = self.node.remoter.run('df --output=used /var/lib/scylla').stdout
         # output is of the form:
         # Used
-        #   YY (number of 1KiB blocks)
+        # YY (number of 1KiB blocks)
+        return int(output.split()[1])*1024
+
+    def get_total_disk_size(self):
+        output = self.node.remoter.run('df --output=size /var/lib/scylla').stdout
+        # output is of the form:
+        # 1K-blocks
+        # YY (number of 1KiB blocks)
         return int(output.split()[1])*1024
 
     def run(self):
         while not self.stopped():
-            self.size = self.get_current_disk_usage()
-            if self.size > self.limits["soft"][0]:
+            self.used = self.get_current_disk_usage()
+            utilization = self.used / self.size
+
+            if utilization > self.limits["soft"][0]:
                 self.limits["soft"][1]()
 
-            self.log.info(f"Node's {self.node.name} disk utilization: {self.size}")
+            self.log.info(f"Node's {self.node.name} disk ({self.size*B2GB:0.2f}GB) utilization: {self.used}B ~ {self.used*B2GB:0.2f}GB ~ {utilization*100:.2f}%")
             time.sleep(5)
 
 
@@ -70,7 +68,7 @@ class Serverless_v2(LongevityTest):
     def baseline_limit_reached(self):
         self.interrupt_prepare_cluster = True
 
-    def prepare_cluster(self, baseline: int):
+    def prepare_cluster(self, baseline: float):
         self.log.info("Start preparing cluster")
 
         stress_queue = []
@@ -156,12 +154,10 @@ class Serverless_v2(LongevityTest):
         self.log.info("Finished stress cluster")
 
     def test_cluster_scale_out(self):
-        # A baseline set to 85% of the total disk size. A fixed value in bytes.
-        instance = self.params.get("instance_type_db")
-        baseline = int(aws_instance_storage[instance]*GB2B*0.85)
-
-        self.params.update({"space_node_threshold": baseline})
-        self.soft_limit = int(aws_instance_storage[instance]*GB2B*0.9)
+        # A baseline set to 90% of the total disk size
+        baseline = 0.90
+        # A soft limit set to 95% of the total disk size
+        self.soft_limit = 0.95
 
         self.log.info("Starting tests")
 
@@ -177,10 +173,12 @@ class Serverless_v2(LongevityTest):
 
     def soft_limit_reached(self):
         self.log.info("Soft limit reached on one of the nodes. Checking the average disk utilization...")
-        avg_usage = functools.reduce(lambda total, monitor: total + monitor.size, self.monitors_queue, 0)/len(self.monitors_queue)
+        avg_size = functools.reduce(lambda total, monitor: total + monitor.size, self.monitors_queue, 0)/len(self.monitors_queue)
+        avg_used = functools.reduce(lambda total, monitor: total + monitor.used, self.monitors_queue, 0)/len(self.monitors_queue)
+        avg_utilization = avg_used / avg_size
 
-        self.log.info(f"Average disk utilization: {avg_usage}")
-        if avg_usage > self.soft_limit:
+        self.log.info(f"Average disk utilization: {avg_used}B ~ {avg_used*B2GB:0.2f}GB ~ {avg_utilization*100:.2f}%")
+        if avg_utilization > self.soft_limit:
             self.scale_cluster_out = True
 
     def add_node(self):
