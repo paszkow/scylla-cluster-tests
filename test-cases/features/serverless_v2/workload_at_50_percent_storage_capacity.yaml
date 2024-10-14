@@ -7,9 +7,9 @@ prepare_write_cmd: ["cassandra-stress write no-warmup cl=ALL duration=300m -sche
                     "cassandra-stress write no-warmup cl=ALL duration=300m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 -pop seq=200000001..300000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5"
                    ]
 
-stress_cmd: ["cassandra-stress write no-warmup cl=ALL duration=120m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 fixed=700/s -pop seq=300000001..400000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5",
-             "cassandra-stress write no-warmup cl=ALL duration=120m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 fixed=700/s -pop seq=400000001..500000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5",
-             "cassandra-stress write no-warmup cl=ALL duration=120m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 fixed=700/s -pop seq=500000001..600000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5"
+stress_cmd: ["cassandra-stress write no-warmup cl=ALL duration=120m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 fixed=5000/s -pop seq=300000001..400000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5",
+             "cassandra-stress write no-warmup cl=ALL duration=120m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 fixed=5000/s -pop seq=400000001..500000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5",
+             "cassandra-stress write no-warmup cl=ALL duration=120m -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode cql3 native -rate threads=80 fixed=5000/s -pop seq=500000001..600000000 -col 'n=FIXED(10) size=FIXED(512)' -log interval=5"
             ]
 
 round_robin: true
@@ -24,7 +24,7 @@ user_prefix: 'serverless-v2-50-percent-storage-capacity'
 
 append_scylla_yaml:
   enable_tablets: true
-  tablets_initial_scale_factor: 4
+  tablets_initial_scale_factor: 32
 
 # Due to the existing bug: https://github.com/scylladb/scylla-enterprise/issues/3717
 enterprise_disable_kms: true
