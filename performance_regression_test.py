@@ -590,6 +590,22 @@ class PerformanceRegressionTest(ClusterTester):  # pylint: disable=too-many-publ
         self.display_results(results, test_name='test_mixed')
         self.check_regression()
 
+    def test_reader_concurrency_semaphore(self):
+        """
+        Test steps:
+
+        1. Prepare cluster with data
+        2. Run read workload
+        """
+        self.run_fstrim_on_all_db_nodes()
+        self.preload_data()
+
+        # Increase compaction shares to make a node sick
+        cmd = "UPDATE system.config SET value = '1000' WHERE name = 'compaction_static_shares'"
+        self._run_cql_commands(cmd, self.db_cluster.nodes[0])
+
+        self.run_read_workload()
+
     def test_latency(self):
         """
         Test steps:
