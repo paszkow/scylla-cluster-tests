@@ -1,0 +1,4 @@
+append_scylla_yaml:
+  read_request_timeout_in_ms: 1000
+
+append_scylla_args: '--reader-concurrency-semaphore-preemptive-abort-factor 0.8
