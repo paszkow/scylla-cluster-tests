@@ -91,6 +91,10 @@ class CompactionOps:
         node = node if node else self.node
         node.run_nodetool(f'disableautocompaction {keyspace} {cf}')
 
+    def enable_autocompaction_on_ks_cf(self, node: BaseNode,  keyspace: str = "", cf: Optional[str] = ""):
+        node = node if node else self.node
+        node.run_nodetool(f'enableautocompaction {keyspace} {cf}')
+
     def _stop_compaction(self, nodetool_cmd: str) -> Result:
         LOGGER.info("Stopping compaction with nodetool %s", nodetool_cmd)
         return self.node.run_nodetool(nodetool_cmd)
