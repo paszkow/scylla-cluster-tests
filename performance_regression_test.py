@@ -31,6 +31,7 @@ from sdcm.sct_events.system import HWPerforanceEvent, InfoEvent
 from sdcm.utils.decorators import log_run_info, latency_calculator_decorator, optional_stage
 from sdcm.utils.csrangehistogram import CSHistogramTagTypes
 from sdcm.utils.nemesis_utils.indexes import wait_for_view_to_be_built
+from sdcm.utils.compaction_ops import CompactionOps
 
 KB = 1024
 
@@ -597,12 +598,21 @@ class PerformanceRegressionTest(ClusterTester):  # pylint: disable=too-many-publ
         1. Prepare cluster with data
         2. Run read workload
         """
+        # Disable autocompaction on one node
+        compaction_ops = CompactionOps(cluster=self.db_cluster)
+        compaction_ops.disable_autocompaction_on_ks_cf(node=self.db_cluster.nodes[0])
+
         self.run_fstrim_on_all_db_nodes()
         self.preload_data()
+        self.wait_no_compactions_running()
+        self.run_fstrim_on_all_db_nodes()
 
-        # Increase compaction shares to make a node sick
-        cmd = "UPDATE system.config SET value = '1000' WHERE name = 'compaction_static_shares'"
-        self._run_cql_commands(cmd, self.db_cluster.nodes[0])
+        # # Increase compaction shares to make a node sick
+        # cmd = "UPDATE system.config SET value = '1000' WHERE name = 'compaction_static_shares'"
+        # self._run_cql_commands(cmd, self.db_cluster.nodes[0])
+
+        # Re-enable autocompaction on one node
+        compaction_ops.enable_autocompaction_on_ks_cf(node=self.db_cluster.nodes[0])
 
         self.run_read_workload()
 
