@@ -1,9 +1,14 @@
-# Disabled speculative_retry to match the configuration of
-# scylla-enterprise-perf-regression-predefined-throughput-steps-tablets,
-# allowing this test to be used as a comparable benchmark.
+# ALTER TABLE command used by the compression-toggle reproducer
+# (SCYLLADB-1214) to enable ZSTD dictionary compression mid-workload.
+#
+# Target table is scylla_bench.test because the reproducer uses
+# scylla-bench with large partitions to trigger LSA compaction stalls.
+#
+# speculative_retry is disabled to match the perf-regression-predefined-
+# throughput-steps-tablets baseline configuration.
 # Owned by Storage QA
 post_prepare_cql_cmds: >-
-  ALTER TABLE keyspace1.standard1
+  ALTER TABLE scylla_bench.test
   WITH compression = {
     'sstable_compression': 'ZstdWithDictsCompressor'
   }

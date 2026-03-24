@@ -1,0 +1,28 @@
+#!groovy
+
+// Reproducer for SCYLLADB-1214: Reactor stalls from ZSTD dict compression
+// context allocation during SSTable writer creation.
+//
+// For each throttle step, runs two phases:
+//   1. Baseline (default LZ4 compression) -- establishes latency baseline
+//   2. ZSTD dict compression enabled mid-workload -- triggers the stall
+//
+// Reactor stalls and latency spikes should be visible in phase 2 but not
+// phase 1, confirming the ZSTD dict compression allocation is the cause.
+
+// trick from https://github.com/jenkinsci/workflow-cps-global-lib-plugin/pull/43
+def lib = library identifier: 'sct@snapshot', retriever: legacySCM(scm)
+
+perfRegressionParallelPipeline(
+    backend: "aws",
+    region: "us-east-1",
+    provision_type: 'on_demand',
+    test_name: "performance_regression_gradual_grow_throughput.PerformanceRegressionPredefinedStepsTest",
+    test_config: '''[
+    "test-cases/performance/perf-regression-predefined-throughput-steps.yaml",
+    "configurations/performance/cassandra_stress_spiky_load_steps_zstd_dict.yaml",
+    "configurations/disable_kms.yaml",
+    "configurations/compression/zstd_dict_compression.yaml"
+    ]''',
+    sub_tests: ["test_mixed_compression_toggle"],
+)

@@ -1,0 +1,55 @@
+# Overlay config for the SCYLLADB-1214 compression-toggle reproducer.
+#
+# Overrides the base perf-regression-predefined-throughput-steps.yaml to
+# use scylla-bench with large partitions instead of cassandra-stress with
+# single-row partitions.  Large partitions are critical: they fill the row
+# cache with big B+ tree nodes so that LSA segment compaction (triggered by
+# the ZSTD dict context allocation) takes 100+ ms per segment -- the root
+# cause of the reactor stalls.
+#
+# Data shape:
+#   - 50 partitions x 200,000 clustering rows x 100-5120 bytes/row
+#   - ~250-500 GB total dataset (3x RF) spread across 4 loaders
+#   - Each partition ~130-250 MB -- large enough to fill row cache segments
+#
+# Two throttle levels + unthrottled, each running twice (baseline + with
+# ZSTD dict compression).  10-minute phases mean ~60 min of stress +
+# compaction waits.
+#
+# Refs: SCYLLADB-1214
+
+# --- Throttle / step configuration ---
+perf_gradual_threads: {"mixed": 200}
+perf_gradual_throttle_steps: {"mixed": ['30000', 'unthrottled']}
+perf_gradual_step_duration: {"mixed": '10m'}
+
+# --- Schema preparation (single row, just to create the table) ---
+prepare_stress_cmd: >-
+  scylla-bench -workload=sequential -mode=write -replication-factor=3
+  -consistency-level=all
+  -partition-count=1 -clustering-row-count=1 -clustering-row-size=1024
+  -concurrency=1 -connection-count=1 -rows-per-request=1
+
+# --- Data preload: 50 partitions, 200k clustering rows each ---
+# Split across 4 loaders via partition-offset.
+# Using sequential workload to write all rows deterministically.
+prepare_write_cmd: [
+  "scylla-bench -workload=sequential -mode=write -replication-factor=3 -consistency-level=all -partition-count=13 -partition-offset=0  -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 -concurrency=100 -connection-count=100 -rows-per-request=10 -timeout=60s",
+  "scylla-bench -workload=sequential -mode=write -replication-factor=3 -consistency-level=all -partition-count=13 -partition-offset=13 -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 -concurrency=100 -connection-count=100 -rows-per-request=10 -timeout=60s",
+  "scylla-bench -workload=sequential -mode=write -replication-factor=3 -consistency-level=all -partition-count=12 -partition-offset=26 -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 -concurrency=100 -connection-count=100 -rows-per-request=10 -timeout=60s",
+  "scylla-bench -workload=sequential -mode=write -replication-factor=3 -consistency-level=all -partition-count=12 -partition-offset=38 -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 -concurrency=100 -connection-count=100 -rows-per-request=10 -timeout=60s"
+]
+
+# --- Cache warmup: read all data into row cache ---
+stress_cmd_cache_warmup: [
+  "scylla-bench -workload=sequential -mode=read -replication-factor=3 -consistency-level=all -partition-count=13 -partition-offset=0  -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 -concurrency=$threads -connection-count=100 -rows-per-request=10 -timeout=60s",
+  "scylla-bench -workload=sequential -mode=read -replication-factor=3 -consistency-level=all -partition-count=13 -partition-offset=13 -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 -concurrency=$threads -connection-count=100 -rows-per-request=10 -timeout=60s",
+  "scylla-bench -workload=sequential -mode=read -replication-factor=3 -consistency-level=all -partition-count=12 -partition-offset=26 -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 -concurrency=$threads -connection-count=100 -rows-per-request=10 -timeout=60s",
+  "scylla-bench -workload=sequential -mode=read -replication-factor=3 -consistency-level=all -partition-count=12 -partition-offset=38 -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 -concurrency=$threads -connection-count=100 -rows-per-request=10 -timeout=60s"
+]
+
+# --- Mixed workload (50% read / 50% write) ---
+# Uses uniform workload for realistic random access during the test phase.
+stress_cmd_m: [
+  "scylla-bench -workload=uniform -mode=mixed -replication-factor=3 -consistency-level=quorum -partition-count=50 -clustering-row-count=200000 -clustering-row-size=uniform:100..5120 $throttle -concurrency=$threads -connection-count=100 -rows-per-request=10 -iterations=0 -duration=$duration -timeout=300s"
+]

@@ -207,6 +207,213 @@ class PerformanceRegressionPredefinedStepsTest(PerformanceRegressionTest):
             workload=workload, test_name="test_read_disk_only_gradual_increase_load (100% reads from disk)"
         )
 
+    def test_mixed_compression_toggle(self):
+        """
+        Reproducer for SCYLLADB-1214: reactor stalls from ZSTD dict compression
+        context allocation during SSTable writer creation.
+
+        For each throttle step, runs the workload in two phases:
+        1. Baseline phase (default compression, no dictionary) for T minutes
+        2. ZSTD dict compression phase (ALTER TABLE mid-workload) for T minutes
+
+        Enabling compression during a running workload triggers new SSTable
+        writers with ZSTD dict compression, which allocates ~256 KiB for the
+        compression context. This allocation can cascade into non-preemptible
+        LSA segment compaction, causing 100+ ms reactor stalls and latency
+        spikes visible in the second phase.
+
+        Requires config overlays:
+        - configurations/compression/zstd_dict_compression.yaml (provides post_prepare_cql_cmds)
+        - configurations/performance/cassandra_stress_spiky_load_steps_zstd_dict.yaml (throttle steps)
+        """
+        workload_type = "mixed"
+        keyspace, table = self.get_test_table_name(self.params.get("stress_cmd_m"))
+        workload = Workload(
+            workload_type=workload_type,
+            cs_cmd_tmpl=self.params.get("stress_cmd_m"),
+            cs_cmd_warm_up=self.params.get("stress_cmd_cache_warmup"),
+            num_threads=self.params["perf_gradual_threads"][workload_type],
+            throttle_steps=self.throttle_steps(workload_type),
+            preload_data=True,
+            drop_keyspace=False,
+            wait_no_compactions=True,
+            step_duration=self.step_duration(workload_type),
+            test_keyspace=keyspace,
+            test_table=table,
+            prepare_schema=False,
+        )
+        self._compression_toggle_test_workflow(
+            workload=workload,
+            test_name="test_mixed_compression_toggle (SCYLLADB-1214 reproducer)",
+        )
+
+    def _compression_toggle_test_workflow(self, workload: Workload, test_name):
+        """
+        Workflow that runs each throttle step in two phases: baseline (default
+        compression) and with ZSTD dict compression enabled mid-workload.
+
+        The compression-enable CQL is taken from the ``post_prepare_cql_cmds``
+        parameter (set by the zstd_dict_compression.yaml overlay).  After each
+        compression phase the table is reverted to default LZ4 compression so
+        that the next step's baseline starts clean.
+        """
+        stress_num = 1
+        num_loaders = len(self.loaders.nodes)
+        self.run_fstrim_on_all_db_nodes()
+
+        # Preload data with default compression (NO post_prepare_cql here).
+        if workload.preload_data and not skip_optional_stage("perf_preload_data"):
+            self.preload_data()
+            # Do NOT run post_prepare_cql -- we want default compression during preload.
+            self.wait_no_compactions_running(n=400, sleep_time=120)
+            self.wait_for_no_tablets_splits()
+            self.run_fstrim_on_all_db_nodes()
+
+        self.run_compression_toggle_load(
+            workload=workload,
+            stress_num=stress_num,
+            num_loaders=num_loaders,
+            test_name=test_name,
+        )
+
+    # pylint: disable=too-many-arguments,too-many-locals
+    def run_compression_toggle_load(self, workload: Workload, stress_num, num_loaders, test_name):  # noqa: PLR0914
+        """
+        For each throttle step, run two phases:
+          1. *baseline* -- default compression (LZ4, no dictionary)
+          2. *with_zstd_dict* -- ZSTD dictionary compression enabled mid-workload
+
+        Latency and reactor-stall metrics are collected separately for each
+        phase so that the impact of the ZSTD dict context allocation stall
+        is clearly visible.
+        """
+        workload = self.update_num_threads_for_steps(workload=workload)
+
+        if workload.cs_cmd_warm_up is not None:
+            self.warmup_cache(workload.cs_cmd_warm_up, max(workload.num_threads))
+            time.sleep(240)
+
+        if self.create_stats and not self.exists():
+            self.log.debug("Create test statistics in ES")
+            self.create_test_stats(sub_type=workload.workload_type, doc_id_with_timestamp=False)
+        total_summary = {}
+
+        enable_compression_cql = self.params.get("post_prepare_cql_cmds")
+        if not enable_compression_cql:
+            TestFrameworkEvent(
+                source=self.__class__.__name__,
+                message="post_prepare_cql_cmds is not set -- cannot toggle compression. "
+                "Include configurations/compression/zstd_dict_compression.yaml.",
+                severity=Severity.CRITICAL,
+            ).publish()
+            return
+
+        test_table = f"{workload.test_keyspace}.{workload.test_table}"
+        revert_compression_cql = (
+            f"ALTER TABLE {test_table} WITH compression = {{'sstable_compression': 'LZ4Compressor'}}"
+        )
+
+        sequential_steps = self.get_sequential_throttle_steps(workload)
+        for throttle_step, num_threads, current_throttle_step in zip(
+            workload.throttle_steps,
+            workload.num_threads,
+            sequential_steps,
+        ):
+            current_throttle = self.current_throttle(
+                throttle_step,
+                num_loaders,
+                stress_num,
+                workload.cs_cmd_tmpl[0],
+            )
+
+            # --- Phase 1: baseline (default compression) ---
+            baseline_step_name = f"{current_throttle_step}_baseline"
+            self.log.info(
+                "Phase 1 (baseline): rate=%s, threads=%s, step=%s",
+                throttle_step,
+                num_threads,
+                baseline_step_name,
+            )
+            run_baseline = latency_calculator_decorator(
+                legend=f"Baseline (no dict compression) step {current_throttle_step} op/s",
+                cycle_name=baseline_step_name,
+            )(self.run_step)
+            results_baseline, _ = run_baseline(
+                stress_cmds=workload.cs_cmd_tmpl,
+                current_throttle=current_throttle,
+                num_threads=num_threads,
+                step_duration=workload.step_duration,
+            )
+
+            calculate_result = self._calculate_average_max_latency(results_baseline)
+            self.update_test_details()
+            summary_result = self.check_latency_during_steps(step=baseline_step_name)
+            summary_result[baseline_step_name].update({"ops_rate": calculate_result["op rate"] * num_loaders})
+            total_summary.update(summary_result)
+
+            # --- Enable ZSTD dict compression ---
+            self.log.info("Enabling ZSTD dict compression: %s", enable_compression_cql)
+            self._run_cql_commands(enable_compression_cql)
+
+            # Rewrite all SSTables with the new compressor.  This is what
+            # triggers the large ZSTD dict context allocation on every shard
+            # and, with large partitions in the row cache, the non-preemptible
+            # LSA segment compaction stall (SCYLLADB-1214).
+            self.log.info(
+                "Running 'nodetool upgradesstables -a' on all nodes to rewrite SSTables with ZstdWithDictsCompressor"
+            )
+            for node in self.db_cluster.nodes:
+                node.run_nodetool(
+                    sub_cmd="upgradesstables",
+                    args=f"-a -- {workload.test_keyspace} {workload.test_table}",
+                )
+            self.log.info("upgradesstables completed on all nodes")
+
+            # --- Phase 2: with ZSTD dict compression ---
+            compression_step_name = f"{current_throttle_step}_with_zstd_dict"
+            self.log.info(
+                "Phase 2 (ZSTD dict): rate=%s, threads=%s, step=%s",
+                throttle_step,
+                num_threads,
+                compression_step_name,
+            )
+            run_compression = latency_calculator_decorator(
+                legend=f"With ZSTD dict compression step {current_throttle_step} op/s",
+                cycle_name=compression_step_name,
+            )(self.run_step)
+            results_compression, _ = run_compression(
+                stress_cmds=workload.cs_cmd_tmpl,
+                current_throttle=current_throttle,
+                num_threads=num_threads,
+                step_duration=workload.step_duration,
+            )
+
+            calculate_result = self._calculate_average_max_latency(results_compression)
+            self.update_test_details()
+            summary_result = self.check_latency_during_steps(step=compression_step_name)
+            summary_result[compression_step_name].update({"ops_rate": calculate_result["op rate"] * num_loaders})
+            total_summary.update(summary_result)
+
+            # --- Revert compression for next step's baseline ---
+            self.log.info("Reverting compression: %s", revert_compression_cql)
+            self._run_cql_commands(revert_compression_cql)
+            self.log.info("Running 'nodetool upgradesstables -a' to rewrite SSTables back to LZ4")
+            for node in self.db_cluster.nodes:
+                node.run_nodetool(
+                    sub_cmd="upgradesstables",
+                    args=f"-a -- {workload.test_keyspace} {workload.test_table}",
+                )
+
+            if workload.wait_no_compactions:
+                if (wait_time := self.wait_no_compactions_running()[0]) < 180:
+                    time.sleep(180 - wait_time)
+                self.log.info("All compactions are finished")
+                self.wait_for_no_tablets_splits()
+
+        self.save_total_summary_in_file(total_summary)
+        if self.create_stats:
+            self.run_performance_analyzer(total_summary=total_summary)
+
     def _base_test_workflow(self, workload: Workload, test_name):
         stress_num = 1  # TODO: fix it to support multiple stress cmds per loader node (useful for latte)
         num_loaders = len(self.loaders.nodes)
