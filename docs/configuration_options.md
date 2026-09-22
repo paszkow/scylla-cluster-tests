@@ -2346,11 +2346,11 @@ Runs a background thread that verifies Tombstones GC on a table by an interval
 
 ## **pre_create_keyspace** / SCT_PRE_CREATE_KEYSPACE
 
-Command to create keysapce to be pre-create before running workload
+CQL statement(s) to run before the workload, e.g. to create the keyspace with non-default options (tablets, S3 storage) or the test table with non-default options (caching). One statement per element; from the environment variable pass either a single statement or a Python list literal of statements
 
 **default:** N/A
 
-**type:** str_or_list (appendable)
+**type:** str_or_list_or_eval (appendable)
 
 
 ## **post_prepare_cql_cmds** / SCT_POST_PREPARE_CQL_CMDS
@@ -2720,6 +2720,15 @@ Step duration of c-s load for gradual performance test per sub-test. Example: {'
 **default:** N/A
 
 **type:** dict_or_str
+
+
+## **perf_gradual_disable_tablets_balancing** / SCT_PERF_GRADUAL_DISABLE_TABLETS_BALANCING
+
+Disable the tablet load balancer after the data preparation and before the first throttle step, so that no tablet migration runs during the measurement
+
+**default:** N/A
+
+**type:** boolean
 
 
 ## **skip_download** / SCT_SKIP_DOWNLOAD

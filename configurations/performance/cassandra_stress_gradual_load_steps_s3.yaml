@@ -1,0 +1,7 @@
+# Throttle steps for the read workload on an S3 keyspace (test_read_gradual_increase_load).
+# Use with test-cases/performance/perf-regression-predefined-throughput-steps-s3.yaml and configurations/object_storage_s3.yaml.
+# Threads per step follow Little's law (rate per loader x latency): at ~250 ms worst-case S3 read latency,
+# 20k op/s over 2 loaders needs 10,000 x 0.25 = 2,500 threads per loader.
+perf_gradual_threads: {"read": [900, 1300, 1900, 2500, 900]}
+perf_gradual_throttle_steps: {"read": ['5000', '10000', '15000', '20000', 'unthrottled']}
+perf_gradual_step_duration: {"read": '30m'}

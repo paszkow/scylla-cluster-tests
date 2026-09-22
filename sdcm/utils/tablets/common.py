@@ -26,6 +26,23 @@ class TabletsConfiguration:
         return "{" + ", ".join(items) + "}"
 
 
+def set_tablets_balancing(node, enabled: bool):
+    """
+    Enable or disable the tablet load balancer cluster-wide through the REST API of `node`.
+
+    Used by steady-state performance tests to keep tablet migrations (and the extra per-scheduling-group
+    S3 clients they create on object-storage keyspaces) out of the measurement window.
+    """
+    if not is_tablets_feature_enabled(node):
+        LOGGER.info("Tablets are disabled, skipping tablet balancing switch")
+        return
+    client = RemoteCurlClient(host="127.0.0.1:10000", endpoint="", node=node)
+    client.run_remoter_curl(
+        method="POST", path="storage_service/tablets/balancing", params={"enabled": str(enabled).lower()}
+    )
+    LOGGER.info("Tablet load balancing %s", "enabled" if enabled else "disabled")
+
+
 def wait_no_tablets_migration_running(node, timeout: int = 3600):
     """
     Waiting for having no ongoing tablets topology operations using REST API.

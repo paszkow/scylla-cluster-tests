@@ -1612,8 +1612,10 @@ class SCTConfiguration(dict):
         dict(
             name="pre_create_keyspace",
             env="SCT_PRE_CREATE_KEYSPACE",
-            type=str_or_list,
-            help="Command to create keysapce to be pre-create before running workload",
+            type=str_or_list_or_eval,
+            help="CQL statement(s) to run before the workload, e.g. to create the keyspace with non-default options "
+            "(tablets, S3 storage) or the test table with non-default options (caching). One statement per element; "
+            "from the environment variable pass either a single statement or a Python list literal of statements",
         ),
         dict(
             name="post_prepare_cql_cmds",
@@ -1917,6 +1919,13 @@ class SCTConfiguration(dict):
             type=dict_or_str,
             help="Step duration of c-s load for gradual performance test per sub-test. "
             "Example: {'read': '30m', 'write': None, 'mixed': '30m'}",
+        ),
+        dict(
+            name="perf_gradual_disable_tablets_balancing",
+            env="SCT_PERF_GRADUAL_DISABLE_TABLETS_BALANCING",
+            type=boolean,
+            help="Disable the tablet load balancer after the data preparation and before the first throttle step, "
+            "so that no tablet migration runs during the measurement",
         ),
         # RefreshTest
         dict(name="skip_download", env="SCT_SKIP_DOWNLOAD", type=boolean, help=""),
