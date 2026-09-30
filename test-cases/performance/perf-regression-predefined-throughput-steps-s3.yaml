@@ -1,8 +1,22 @@
-# Predefined throughput steps on an S3 keyspace, test_read_gradual_increase_load only.
+# Webinar demo variant of the S3 predefined-throughput-steps case.
 # Use with configurations/object_storage_s3.yaml and configurations/performance/cassandra_stress_gradual_load_steps_s3.yaml.
-# Reads use a gaussian key distribution and a cache warm-up over the same distribution, so every step runs at the
-# same cache hit rate. Each command is listed once per loader (commands are distributed round-robin).
-test_duration: 500
+#
+# SCT provisions, loads 100M rows, disables the row cache on the table, and runs one 15-minute read
+# workload. Every read therefore goes to S3, which is the only case worth showing: a read served from
+# cache behaves identically to a cluster on local NVMe, so it demonstrates nothing about this feature.
+#
+# The cache is disabled through post_prepare_cql_cmds, which runs after the data load and before the
+# step. replica/database.hh:821 gates the row cache on that table option. That option is appendable,
+# so this merges with configurations/disable_speculative_retry.yaml rather than replacing it.
+#
+# AFTER THE RUN, if you intend to keep using the cluster:
+#   ALTER TABLE keyspace1.standard1 WITH caching = {'enabled': 'true'};
+#
+# Three nodes: the demo is user-facing operations only - no scale-out, no decommission - so there is
+# nothing to gain from six. 100M rows x 1 KB is ~100 GB of rows, ~287 GB in the bucket at RF=3, and
+# ~96 GB per node of responsibility while local disk holds only the commitlog. Reads are uniform
+# random across all 100M rows.
+test_duration: 120
 
 perf_stress_keyspace: keyspace1
 perf_stress_table: standard1
@@ -11,19 +25,22 @@ pre_create_keyspace: [
   "CREATE KEYSPACE IF NOT EXISTS keyspace1 WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': '3'} AND storage = {'type': 'S3', 'bucket': 'manager-backup-tests-us-east-1', 'endpoint': 's3.us-east-1.amazonaws.com'};",
 ]
 
+post_prepare_cql_cmds: [
+  "ALTER TABLE keyspace1.standard1 WITH caching = {'enabled': 'false'}",
+]
+
 prepare_write_cmd: [
-    "cassandra-stress write  cl=ALL n=325000002 -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode connectionsPerHost=8 cql3 native -rate threads=100 throttle=75000/s -col 'size=FIXED(1024) n=FIXED(1)'  -pop seq=1..325000002",
-    "cassandra-stress write  cl=ALL n=325000002 -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode connectionsPerHost=8 cql3 native -rate threads=100 throttle=75000/s -col 'size=FIXED(1024) n=FIXED(1)'  -pop seq=325000003..650000004",
+    "cassandra-stress write  cl=ALL n=50000000 -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode connectionsPerHost=8 cql3 native -rate threads=100 throttle=75000/s -col 'size=FIXED(1024) n=FIXED(1)'  -pop seq=1..50000000",
+    "cassandra-stress write  cl=ALL n=50000000 -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode connectionsPerHost=8 cql3 native -rate threads=100 throttle=75000/s -col 'size=FIXED(1024) n=FIXED(1)'  -pop seq=50000001..100000000",
 ]
 
+# One read workload. The cache is disabled before it starts, so every read is an S3 GET.
+# Uniform random over the whole dataset: an archive is queried by lookup, not by scanning keys in
+# order, and a distribution exercises all 100M rows rather than hammering a narrow window. Both
+# loaders sample the same distribution rather than splitting a range.
 stress_cmd_r: [
-  "cassandra-stress read no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=8 cql3 native -rate 'threads=$threads $throttle' -col 'size=FIXED(1024) n=FIXED(1)' -pop 'dist=gauss(1..650000000,325000000,20000000)'",
-  "cassandra-stress read no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=8 cql3 native -rate 'threads=$threads $throttle' -col 'size=FIXED(1024) n=FIXED(1)' -pop 'dist=gauss(1..650000000,325000000,20000000)'",
-]
-
-stress_cmd_cache_warmup: [
-  "cassandra-stress read no-warmup cl=ALL n=60000000 -mode connectionsPerHost=8 cql3 native -rate 'threads=$threads' -col 'size=FIXED(1024) n=FIXED(1)' -pop 'dist=gauss(1..650000000,325000000,20000000)'",
-  "cassandra-stress read no-warmup cl=ALL n=60000000 -mode connectionsPerHost=8 cql3 native -rate 'threads=$threads' -col 'size=FIXED(1024) n=FIXED(1)' -pop 'dist=gauss(1..650000000,325000000,20000000)'",
+  "cassandra-stress read no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=8 cql3 native -rate 'threads=$threads $throttle' -col 'size=FIXED(1024) n=FIXED(1)' -pop 'dist=uniform(1..100000000)'",
+  "cassandra-stress read no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=8 cql3 native -rate 'threads=$threads $throttle' -col 'size=FIXED(1024) n=FIXED(1)' -pop 'dist=uniform(1..100000000)'",
 ]
 
 round_robin: true
@@ -41,9 +58,8 @@ use_preinstalled_scylla: true
 use_prepared_loaders: false
 use_mgmt: false
 
-user_prefix: 'perf-regression-predefined-steps-s3'
-argus_email_report_template: email_report_performance.yaml
-email_recipients: ['scylla-perf-results@scylladb.com']
+user_prefix: 'webinar-demo-s3'
+# No argus_email_report_template / email_recipients: demo runs must not land in the perf results list.
 
 use_hdrhistogram: true
 cs_extra_jvm_opts: '-XX:+UseZGC -XX:+ZGenerational -Xms8g -Xmx8g -XX:+AlwaysPreTouch'
@@ -52,7 +68,8 @@ backtrace_decoding: true
 backtrace_stall_decoding: false
 adaptive_timeout_store_metrics: false
 
-# No tablet migrations during the steps; on S3 the post-migration cleanup also shrinks the shard's S3 read connection pool.
+# No tablet migrations during the step; on S3 the post-migration cleanup also shrinks the shard's S3
+# read connection pool.
 perf_gradual_disable_tablets_balancing: true
 
 # s3=debug logs the S3 client connection rebalancing between scheduling groups.

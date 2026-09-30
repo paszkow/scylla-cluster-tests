@@ -10,3 +10,10 @@ append_scylla_yaml:
   # group (e.g. gossip, after a tablet cleanup) has created an S3 client on the shard. At ~70 ms per GET
   # that caps a shard at ~700-1,100 GET/s and starves QUORUM reads (build .../tablets/42, node-3 shard 4).
   object_storage_connections_per_shard: 512
+
+  # Webinar demo only. The REST API defaults to 127.0.0.1, so nodetool -h <other-node> and any curl
+  # against another node's API are refused - which forces ssh into every step of the demo. Binding it
+  # to the private network lets the whole demo run from one shell. Needs a restart, so it must be set
+  # at provisioning time. Do not carry this into anything long-lived: it exposes the admin API to the
+  # cluster's network.
+  api_address: 0.0.0.0
