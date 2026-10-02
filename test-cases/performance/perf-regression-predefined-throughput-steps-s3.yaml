@@ -6,8 +6,10 @@
 # cache behaves identically to a cluster on local NVMe, so it demonstrates nothing about this feature.
 #
 # The cache is disabled through post_prepare_cql_cmds, which runs after the data load and before the
-# step. replica/database.hh:821 gates the row cache on that table option. That option is appendable,
-# so this merges with configurations/disable_speculative_retry.yaml rather than replacing it.
+# step. replica/database.hh:821 gates the row cache on that table option. The statement lives in
+# configurations/object_storage_s3.yaml, NOT here: that file is loaded last, and appending to a list
+# across config files requires both a '++' first element and that the appending file comes later
+# (sdcm/sct_config.py:266 - anyconfig MS_DICTS otherwise replaces lists outright).
 #
 # AFTER THE RUN, if you intend to keep using the cluster:
 #   ALTER TABLE keyspace1.standard1 WITH caching = {'enabled': 'true'};
@@ -25,9 +27,6 @@ pre_create_keyspace: [
   "CREATE KEYSPACE IF NOT EXISTS keyspace1 WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': '3'} AND storage = {'type': 'S3', 'bucket': 'manager-backup-tests-us-east-1', 'endpoint': 's3.us-east-1.amazonaws.com'};",
 ]
 
-post_prepare_cql_cmds: [
-  "ALTER TABLE keyspace1.standard1 WITH caching = {'enabled': 'false'}",
-]
 
 prepare_write_cmd: [
     "cassandra-stress write  cl=ALL n=50000000 -schema 'replication(strategy=NetworkTopologyStrategy,replication_factor=3)' -mode connectionsPerHost=8 cql3 native -rate threads=100 throttle=75000/s -col 'size=FIXED(1024) n=FIXED(1)'  -pop seq=1..50000000",

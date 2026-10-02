@@ -17,3 +17,15 @@ append_scylla_yaml:
   # at provisioning time. Do not carry this into anything long-lived: it exposes the admin API to the
   # cluster's network.
   api_address: 0.0.0.0
+
+# Disable the row cache on the stress table, so every read in the demo reaches S3.
+#
+# This has to live here rather than in the test case. post_prepare_cql_cmds is also set by
+# configurations/disable_speculative_retry.yaml, and merging a list across config files replaces it
+# unless the LATER file opts in with a '++' first element (sdcm/sct_config.py:266). This file is
+# loaded last in the job's test_config, so '++' appends to whatever came before instead of discarding
+# it. Without this the ALTER is silently dropped and the workload runs ~30% cache hits.
+post_prepare_cql_cmds:
+  - "++"
+  - "ALTER TABLE keyspace1.standard1 WITH caching = {'enabled': 'false'}"
+
