@@ -903,6 +903,13 @@ class ManagerTestFunctionsMixIn(
                         node.run_nodetool(f"refresh {keyspace} {table} {nodetool_refresh_extra_flags}")
                     self.log.info(f"[Node {index}][{keyspace}.{table}] Nodetool refresh took {timer.duration}")
 
+    def set_tablet_balancing(self, enabled: bool) -> None:
+        InfoEvent(message=f"Setting tablet load balancing to {enabled}").publish()
+        self.db_node.remoter.run(
+            f'curl -X POST "http://127.0.0.1:10000/storage_service/tablets/balancing?enabled={str(enabled).lower()}"',
+            timeout=3600,
+        )
+
     def restore_backup_with_task(
         self,
         mgr_cluster,
@@ -916,16 +923,24 @@ class ManagerTestFunctionsMixIn(
     ):
         location_list = location_list if location_list else self.locations
         dc_mapping = self.get_dc_mapping() if restore_data else None
-        restore_task = mgr_cluster.create_restore_task(
-            restore_schema=restore_schema,
-            restore_data=restore_data,
-            location_list=location_list,
-            snapshot_tag=snapshot_tag,
-            dc_mapping=dc_mapping,
-            extra_params=extra_params,
-            manager_backup_restore_method=manager_backup_restore_method,
-        )
-        restore_task.wait_and_get_final_status(step=30, timeout=timeout)
+        if restore_data:
+            # Load&stream and tablet migrations block each other (SCYLLADB-3350): keep tablet load balancing off
+            # for the whole data restore. Disabling returns only once in-flight tablet transitions are over.
+            self.set_tablet_balancing(enabled=False)
+        try:
+            restore_task = mgr_cluster.create_restore_task(
+                restore_schema=restore_schema,
+                restore_data=restore_data,
+                location_list=location_list,
+                snapshot_tag=snapshot_tag,
+                dc_mapping=dc_mapping,
+                extra_params=extra_params,
+                manager_backup_restore_method=manager_backup_restore_method,
+            )
+            restore_task.wait_and_get_final_status(step=30, timeout=timeout)
+        finally:
+            if restore_data:
+                self.set_tablet_balancing(enabled=True)
         assert restore_task.status == TaskStatus.DONE, f"Restoration of {snapshot_tag} has failed!"
         InfoEvent(
             message=f"The restore task has ended successfully. Restore run time: {restore_task.duration}."
