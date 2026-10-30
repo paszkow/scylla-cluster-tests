@@ -1,0 +1,10 @@
+# Write workload only, one 30-minute step at 50k op/s, for A/B runs of S3 client changes against the
+# write P99 (the step where S3 showed twice the local-disk P99 with the same P50). Overrides
+# configurations/performance/cassandra_stress_gradual_load_steps_object_storage.yaml, so list it after it.
+# Threads per loader as in the full test: 50k op/s over 2 loaders at ~40 ms worst-case latency = 1,000
+# threads, 500 per loader. Same instance type as the reference runs on i8g (8 vCPU).
+perf_gradual_threads: {"write": 500}
+perf_gradual_throttle_steps: {"write": ['50000']}
+perf_gradual_step_duration: {"write": '30m'}
+
+instance_type_db: 'i8g.2xlarge'
