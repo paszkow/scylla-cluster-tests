@@ -1,0 +1,18 @@
+#!groovy
+
+// trick from https://github.com/jenkinsci/workflow-cps-global-lib-plugin/pull/43
+def lib = library identifier: 'sct@snapshot', retriever: legacySCM(scm)
+
+managerPipeline(
+    backend: 'aws',
+    region: '''["us-east-1", "us-west-2"]''',
+    provision_type: 'on_demand',
+    scylla_version: '2026.3',
+    test_name: 'mgmt_cli_test.ManagerRestoreBenchmarkTests.test_restore_benchmark',
+    test_config: '''["test-cases/manager/manager-restore-benchmark-2tb-multiDC.yaml", "configurations/manager/ubuntu24.yaml"]''',
+    mgmt_reuse_backup_snapshot_name: '2tb_1t_twcs_2025_4_multidc',
+
+    post_behavior_db_nodes: 'destroy',
+    post_behavior_loader_nodes: 'destroy',
+    post_behavior_monitor_nodes: 'destroy'
+)
