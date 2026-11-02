@@ -16,7 +16,10 @@ test_metadata:
 
 test_duration: 720
 
-# Snapshot DCs are us-east-1 and us-west-2, the restore maps each DC to the same name
+# Snapshot DCs are us-east-1 and us-west-2, the restore maps each DC to the same name.
+# GossipingPropertyFileSnitch takes the DC name from cassandra-rackdc.properties as-is (the region name);
+# the AWS default Ec2Snitch would name them us-eastscylla_node_east and us-west-2scylla_node_west.
+endpoint_snitch: GossipingPropertyFileSnitch
 region_name: 'us-east-1 us-west-2'
 n_db_nodes: [3, 3]
 n_loaders: [2, 2]
