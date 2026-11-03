@@ -956,11 +956,15 @@ class ManagerTestFunctionsMixIn(
         """Get the datacenter mapping string for the restore task if there are > 1 DCs (multiDC) in the cluster.
         In case of singleDC, return None.
 
+        Only the first node's DC is mapped, so only its backups are restored: the snapshot bucket lives in that
+        DC's region, and every DC's backup holds the full data set.
+
         Example of return string:
-            eu-west-2scylla_node_west=eu-west-2scylla_node_west,us-eastscylla_node_east=us-eastscylla_node_east
+            us-east-1=us-east-1
         """
-        if len(dcs := self.get_all_dcs_names()) > 1:
-            return ",".join([f"{dc}={dc}" for dc in dcs])
+        if len(self.get_all_dcs_names()) > 1:
+            dc = self.db_cluster.get_nodetool_info(self.db_cluster.nodes[0])["Data Center"]
+            return f"{dc}={dc}"
         else:
             return None
 
